@@ -16,6 +16,14 @@ go run .
 
 Then open [http://localhost:8080](http://localhost:8080).
 
+### Optional Tor proxy
+
+To route outbound search requests through Tor, set `GOONPROXY_TOR_PROXY` to a Tor SOCKS endpoint before starting the app:
+
+```bash
+GOONPROXY_TOR_PROXY=socks5h://127.0.0.1:9050 go run .
+```
+
 ## Test
 
 ```bash

@@ -12,6 +12,8 @@ import (
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+const testTorProxyURL = "socks5h://127.0.0.1:9050"
+
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
@@ -121,6 +123,96 @@ func TestAPIChainHopCounts(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+}
+
+func TestNewHTTPClientTorProxyConfig(t *testing.T) {
+	t.Run("uses_tor_proxy_when_valid", func(t *testing.T) {
+		t.Setenv(torProxyEnv, testTorProxyURL)
+
+		client := newHTTPClient()
+		transport, ok := client.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("expected *http.Transport, got %T", client.Transport)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "https://duckduckgo.com", nil)
+		proxyURL, err := transport.Proxy(req)
+		if err != nil {
+			t.Fatalf("unexpected proxy error: %v", err)
+		}
+		if proxyURL == nil {
+			t.Fatal("expected tor proxy URL, got nil")
+		}
+		if proxyURL.String() != testTorProxyURL {
+			t.Fatalf("expected tor proxy URL, got %q", proxyURL.String())
+		}
+	})
+
+	t.Run("falls_back_to_env_proxy_when_invalid", func(t *testing.T) {
+		t.Setenv(torProxyEnv, "")
+		baselineClient := newHTTPClient()
+		baselineTransport, ok := baselineClient.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("expected *http.Transport, got %T", baselineClient.Transport)
+		}
+		req := httptest.NewRequest(http.MethodGet, "https://duckduckgo.com", nil)
+		baselineProxyURL, baselineErr := baselineTransport.Proxy(req)
+		if baselineErr != nil {
+			t.Fatalf("unexpected baseline proxy error: %v", baselineErr)
+		}
+
+		t.Setenv(torProxyEnv, "http://127.0.0.1:9050")
+
+		client := newHTTPClient()
+		transport, ok := client.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("expected *http.Transport, got %T", client.Transport)
+		}
+
+		proxyURL, err := transport.Proxy(req)
+		if err != nil {
+			t.Fatalf("unexpected proxy error: %v", err)
+		}
+		if (baselineProxyURL == nil) != (proxyURL == nil) {
+			t.Fatalf("expected fallback proxy nil=%v, got nil=%v", baselineProxyURL == nil, proxyURL == nil)
+		}
+		if baselineProxyURL != nil && baselineProxyURL.String() != proxyURL.String() {
+			t.Fatalf("expected fallback proxy URL %q, got %q", baselineProxyURL.String(), proxyURL.String())
+		}
+	})
+
+	t.Run("falls_back_to_env_proxy_when_unparseable", func(t *testing.T) {
+		t.Setenv(torProxyEnv, "")
+		baselineClient := newHTTPClient()
+		baselineTransport, ok := baselineClient.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("expected *http.Transport, got %T", baselineClient.Transport)
+		}
+		req := httptest.NewRequest(http.MethodGet, "https://duckduckgo.com", nil)
+		baselineProxyURL, baselineErr := baselineTransport.Proxy(req)
+		if baselineErr != nil {
+			t.Fatalf("unexpected baseline proxy error: %v", baselineErr)
+		}
+
+		t.Setenv(torProxyEnv, "://bad")
+
+		client := newHTTPClient()
+		transport, ok := client.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("expected *http.Transport, got %T", client.Transport)
+		}
+
+		proxyURL, err := transport.Proxy(req)
+		if err != nil {
+			t.Fatalf("unexpected proxy error: %v", err)
+		}
+		if (baselineProxyURL == nil) != (proxyURL == nil) {
+			t.Fatalf("expected fallback proxy nil=%v, got nil=%v", baselineProxyURL == nil, proxyURL == nil)
+		}
+		if baselineProxyURL != nil && baselineProxyURL.String() != proxyURL.String() {
+			t.Fatalf("expected fallback proxy URL %q, got %q", baselineProxyURL.String(), proxyURL.String())
 		}
 	})
 }
