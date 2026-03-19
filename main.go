@@ -52,8 +52,9 @@ type app struct {
 }
 
 const (
-	appName    = "gooNproxy"
-	appVersion = "1.0"
+	appName     = "gooNproxy"
+	appVersion  = "1.0"
+	torProxyEnv = "GOONPROXY_TOR_PROXY"
 )
 
 const page = `<!doctype html>
@@ -188,9 +189,41 @@ func (a *app) apiChain(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func parseTorProxyURL(rawTorProxy string) (*url.URL, error) {
+	parsed, err := url.Parse(rawTorProxy)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("tor proxy URL missing host component")
+	}
+	if parsed.Scheme != "socks5" && parsed.Scheme != "socks5h" {
+		return nil, fmt.Errorf("unsupported scheme %q: expected socks5 or socks5h", parsed.Scheme)
+	}
+	return parsed, nil
+}
+
+func newHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyFromEnvironment
+
+	if rawTorProxy := strings.TrimSpace(os.Getenv(torProxyEnv)); rawTorProxy != "" {
+		if parsed, err := parseTorProxyURL(rawTorProxy); err == nil {
+			transport.Proxy = http.ProxyURL(parsed)
+		} else {
+			fmt.Fprintf(os.Stderr, "invalid %s value: %v; expected socks5://host:port or socks5h://host:port\n", torProxyEnv, err)
+		}
+	}
+
+	return &http.Client{
+		Timeout:   15 * time.Second,
+		Transport: transport,
+	}
+}
+
 func routes(now time.Time) http.Handler {
 	a := &app{
-		client:       &http.Client{Timeout: 15 * time.Second},
+		client:       newHTTPClient(),
 		randomSource: newRandomizer(now.UnixNano()),
 	}
 	mux := http.NewServeMux()
