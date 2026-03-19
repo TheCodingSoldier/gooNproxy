@@ -49,12 +49,14 @@ func (r *randomizer) buildChain(count int) hopChain {
 type app struct {
 	client       *http.Client
 	randomSource *randomizer
+	publicURL    string
 }
 
 const (
-	appName     = "gooNproxy"
-	appVersion  = "1.0"
-	torProxyEnv = "GOONPROXY_TOR_PROXY"
+	appName      = "gooNproxy"
+	appVersion   = "1.0"
+	torProxyEnv  = "GOONPROXY_TOR_PROXY"
+	publicURLEnv = "GOONPROXY_PUBLIC_URL"
 )
 
 const page = `<!doctype html>
@@ -75,6 +77,9 @@ const page = `<!doctype html>
 <body>
   <h1>` + appName + `</h1>
   <p>Privacy-focused search proxy with simulated multi-hop IP/MAC randomization.</p>
+  {{ if .PublicURL }}
+  <p><strong>Public website:</strong> <a href="{{ .PublicURL }}">{{ .PublicURL }}</a></p>
+  {{ end }}
   <form method="get" action="/search">
     <label for="q">Search</label><br>
     <input id="q" name="q" type="text" value="{{ .Query }}" placeholder="type your query">
@@ -141,6 +146,7 @@ type pageData struct {
 	ChainJSON     string
 	ResultPreview string
 	ErrorMessage  string
+	PublicURL     string
 }
 
 func renderPage(w http.ResponseWriter, data pageData) error {
@@ -154,7 +160,7 @@ func renderPage(w http.ResponseWriter, data pageData) error {
 }
 
 func (a *app) index(w http.ResponseWriter, r *http.Request) {
-	if err := renderPage(w, pageData{}); err != nil {
+	if err := renderPage(w, pageData{PublicURL: a.publicURL}); err != nil {
 		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
 }
@@ -204,6 +210,7 @@ func (a *app) search(w http.ResponseWriter, r *http.Request) {
 		TargetURL:     target,
 		ChainJSON:     string(chainBytes),
 		ResultPreview: resultPreview,
+		PublicURL:     a.publicURL,
 	}
 
 	if err := renderPage(w, data); err != nil {
@@ -247,6 +254,20 @@ func parseTorProxyURL(rawTorProxy string) (*url.URL, error) {
 	return parsed, nil
 }
 
+func parsePublicURL(rawPublicURL string) (*url.URL, error) {
+	parsed, err := url.Parse(rawPublicURL)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("public URL missing host component")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("unsupported scheme %q: expected http or https", parsed.Scheme)
+	}
+	return parsed, nil
+}
+
 func newHTTPClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = http.ProxyFromEnvironment
@@ -266,9 +287,19 @@ func newHTTPClient() *http.Client {
 }
 
 func routes(now time.Time) http.Handler {
+	publicURL := ""
+	if rawPublicURL := strings.TrimSpace(os.Getenv(publicURLEnv)); rawPublicURL != "" {
+		if parsed, err := parsePublicURL(rawPublicURL); err == nil {
+			publicURL = parsed.String()
+		} else {
+			fmt.Fprintf(os.Stderr, "invalid %s value: %v; expected http://host or https://host\n", publicURLEnv, err)
+		}
+	}
+
 	a := &app{
 		client:       newHTTPClient(),
 		randomSource: newRandomizer(now.UnixNano()),
+		publicURL:    publicURL,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", a.index)
