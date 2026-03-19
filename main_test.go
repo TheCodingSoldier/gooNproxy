@@ -71,4 +71,30 @@ func TestAPIChainHopCounts(t *testing.T) {
 			t.Fatalf("expected 5 hops, got %d", len(chain.Hops))
 		}
 	})
+
+	t.Run("custom", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/random-chain?hops=7", nil)
+		rec := httptest.NewRecorder()
+
+		a.apiChain(rec, req)
+
+		var chain hopChain
+		if err := json.Unmarshal(rec.Body.Bytes(), &chain); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if len(chain.Hops) != 7 {
+			t.Fatalf("expected 7 hops, got %d", len(chain.Hops))
+		}
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/random-chain?hops=0", nil)
+		rec := httptest.NewRecorder()
+
+		a.apiChain(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
 }

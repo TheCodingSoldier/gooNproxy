@@ -8,6 +8,8 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -94,7 +96,9 @@ type pageData struct {
 }
 
 func (a *app) index(w http.ResponseWriter, r *http.Request) {
-	_ = tmpl.Execute(w, pageData{})
+	if err := tmpl.Execute(w, pageData{}); err != nil {
+		http.Error(w, "failed to render page", http.StatusInternalServerError)
+	}
 }
 
 func (a *app) search(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +117,11 @@ func (a *app) search(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("User-Agent", "gooNproxy/1.0 (+privacy-search-proxy)")
 
 	chain := a.randomSource.buildChain(3)
-	chainBytes, _ := json.MarshalIndent(chain, "", "  ")
+	chainBytes, err := json.MarshalIndent(chain, "", "  ")
+	if err != nil {
+		http.Error(w, "failed to build randomized chain", http.StatusInternalServerError)
+		return
+	}
 	resultPreview := ""
 
 	res, err := a.client.Do(req)
@@ -121,8 +129,12 @@ func (a *app) search(w http.ResponseWriter, r *http.Request) {
 		resultPreview = "upstream request failed: " + err.Error()
 	} else {
 		defer res.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 3000))
-		resultPreview = string(body)
+		body, readErr := io.ReadAll(io.LimitReader(res.Body, 3000))
+		if readErr != nil {
+			resultPreview = "upstream response read failed: " + readErr.Error()
+		} else {
+			resultPreview = string(body)
+		}
 	}
 
 	data := pageData{
@@ -133,17 +145,26 @@ func (a *app) search(w http.ResponseWriter, r *http.Request) {
 		ResultPreview: resultPreview,
 	}
 
-	_ = tmpl.Execute(w, data)
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, "failed to render search result", http.StatusInternalServerError)
+	}
 }
 
 func (a *app) apiChain(w http.ResponseWriter, r *http.Request) {
 	hops := 3
-	if val := strings.TrimSpace(r.URL.Query().Get("hops")); val == "5" {
-		hops = 5
+	if val := strings.TrimSpace(r.URL.Query().Get("hops")); val != "" {
+		parsed, err := strconv.Atoi(val)
+		if err != nil || parsed < 1 || parsed > 10 {
+			http.Error(w, "hops must be an integer between 1 and 10", http.StatusBadRequest)
+			return
+		}
+		hops = parsed
 	}
 	chain := a.randomSource.buildChain(hops)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(chain)
+	if err := json.NewEncoder(w).Encode(chain); err != nil {
+		http.Error(w, "failed to encode randomized chain", http.StatusInternalServerError)
+	}
 }
 
 func routes(now time.Time) http.Handler {
@@ -164,5 +185,7 @@ func main() {
 		Handler:           routes(time.Now()),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	_ = server.ListenAndServe()
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Fprintf(os.Stderr, "server failed: %v\n", err)
+	}
 }
