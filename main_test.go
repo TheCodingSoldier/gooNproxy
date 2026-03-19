@@ -89,6 +89,38 @@ func TestIndexIncludesWebsiteRandomChainTool(t *testing.T) {
 	}
 }
 
+func TestIndexIncludesPublicWebsiteLinkWhenConfigured(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	a := &app{
+		client:       client,
+		randomSource: newRandomizer(1),
+		publicURL:    "https://demo.example.com",
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	a.index(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Public website:") {
+		t.Fatalf("expected public website label in page, got body: %s", body)
+	}
+	if !strings.Contains(body, `href="https://demo.example.com"`) {
+		t.Fatalf("expected public website href in page, got body: %s", body)
+	}
+}
+
 func TestAPIChainHopCounts(t *testing.T) {
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -244,6 +276,30 @@ func TestNewHTTPClientTorProxyConfig(t *testing.T) {
 		}
 		if baselineProxyURL != nil && baselineProxyURL.String() != proxyURL.String() {
 			t.Fatalf("expected fallback proxy URL %q, got %q", baselineProxyURL.String(), proxyURL.String())
+		}
+	})
+}
+
+func TestParsePublicURL(t *testing.T) {
+	t.Run("valid_https", func(t *testing.T) {
+		parsed, err := parsePublicURL("https://demo.example.com")
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if parsed.String() != "https://demo.example.com" {
+			t.Fatalf("unexpected URL string: %q", parsed.String())
+		}
+	})
+
+	t.Run("rejects_unsupported_scheme", func(t *testing.T) {
+		if _, err := parsePublicURL("ftp://demo.example.com"); err == nil {
+			t.Fatal("expected error for unsupported scheme, got nil")
+		}
+	})
+
+	t.Run("rejects_missing_host", func(t *testing.T) {
+		if _, err := parsePublicURL("https:///only-path"); err == nil {
+			t.Fatal("expected error for missing host, got nil")
 		}
 	})
 }
