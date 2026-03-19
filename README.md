@@ -5,6 +5,7 @@
 It provides:
 
 - A simple web UI for privacy-oriented search
+- An in-browser HTML5 random chain generator backed by `/api/random-chain`
 - A proxy route that fetches allowed search engine pages server-side
 - A simulated multi-hop IP/MAC randomizer chain for each search request
 
