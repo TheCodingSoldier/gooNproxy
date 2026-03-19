@@ -56,6 +56,37 @@ func TestSearchMissingQuery(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
+	if !strings.Contains(rec.Body.String(), "Please enter a search query.") {
+		t.Fatalf("expected friendly website error, got body: %s", rec.Body.String())
+	}
+}
+
+func TestIndexIncludesWebsiteRandomChainTool(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	a := &app{client: client, randomSource: newRandomizer(1)}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	a.index(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Random Chain (Website Tool)") {
+		t.Fatalf("expected random chain tool in page, got body: %s", body)
+	}
+	if !strings.Contains(body, "id=\"generateChain\"") {
+		t.Fatalf("expected generate chain button in page, got body: %s", body)
+	}
 }
 
 func TestAPIChainHopCounts(t *testing.T) {
