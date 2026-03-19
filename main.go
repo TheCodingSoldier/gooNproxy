@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -50,12 +51,17 @@ type app struct {
 	randomSource *randomizer
 }
 
+const (
+	appName    = "gooNproxy"
+	appVersion = "1.0"
+)
+
 const page = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gooNproxy</title>
+  <title>` + appName + `</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 2rem; max-width: 900px; }
     .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
@@ -65,7 +71,7 @@ const page = `<!doctype html>
   </style>
 </head>
 <body>
-  <h1>gooNproxy</h1>
+  <h1>` + appName + `</h1>
   <p>Privacy-focused search proxy with simulated multi-hop IP/MAC randomization.</p>
   <form method="get" action="/search">
     <label for="q">Search</label><br>
@@ -95,8 +101,18 @@ type pageData struct {
 	ResultPreview string
 }
 
+func renderPage(w http.ResponseWriter, data pageData) error {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, err := w.Write(buf.Bytes())
+	return err
+}
+
 func (a *app) index(w http.ResponseWriter, r *http.Request) {
-	if err := tmpl.Execute(w, pageData{}); err != nil {
+	if err := renderPage(w, pageData{}); err != nil {
 		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
 }
@@ -114,7 +130,7 @@ func (a *app) search(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("User-Agent", "gooNproxy/1.0 (+privacy-search-proxy)")
+	req.Header.Set("User-Agent", appName+"/"+appVersion+" (+privacy-search-proxy)")
 
 	chain := a.randomSource.buildChain(3)
 	chainBytes, err := json.MarshalIndent(chain, "", "  ")
@@ -145,7 +161,7 @@ func (a *app) search(w http.ResponseWriter, r *http.Request) {
 		ResultPreview: resultPreview,
 	}
 
-	if err := tmpl.Execute(w, data); err != nil {
+	if err := renderPage(w, data); err != nil {
 		http.Error(w, "failed to render search result", http.StatusInternalServerError)
 	}
 }
@@ -161,9 +177,14 @@ func (a *app) apiChain(w http.ResponseWriter, r *http.Request) {
 		hops = parsed
 	}
 	chain := a.randomSource.buildChain(hops)
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(chain); err != nil {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(chain); err != nil {
 		http.Error(w, "failed to encode randomized chain", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		fmt.Fprintf(os.Stderr, "failed writing api response: %v\n", err)
 	}
 }
 

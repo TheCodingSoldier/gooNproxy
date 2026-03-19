@@ -2,11 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestBuildChain(t *testing.T) {
 	r := newRandomizer(42)
@@ -28,7 +36,16 @@ func TestBuildChain(t *testing.T) {
 }
 
 func TestSearchMissingQuery(t *testing.T) {
-	a := &app{client: http.DefaultClient, randomSource: newRandomizer(1)}
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	a := &app{client: client, randomSource: newRandomizer(1)}
 	req := httptest.NewRequest(http.MethodGet, "/search", nil)
 	rec := httptest.NewRecorder()
 
@@ -40,7 +57,16 @@ func TestSearchMissingQuery(t *testing.T) {
 }
 
 func TestAPIChainHopCounts(t *testing.T) {
-	a := &app{client: http.DefaultClient, randomSource: newRandomizer(1)}
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("ok")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	a := &app{client: client, randomSource: newRandomizer(1)}
 
 	t.Run("default", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/random-chain", nil)
@@ -57,7 +83,7 @@ func TestAPIChainHopCounts(t *testing.T) {
 		}
 	})
 
-	t.Run("five", func(t *testing.T) {
+	t.Run("five_hops", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/random-chain?hops=5", nil)
 		rec := httptest.NewRecorder()
 
