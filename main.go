@@ -69,6 +69,7 @@ const page = `<!doctype html>
     input[type=text] { width: 70%; padding: .5rem; }
     button { padding: .5rem .8rem; }
     pre { white-space: pre-wrap; word-break: break-word; background:#fafafa; padding: 1rem; border-radius: 8px; }
+    .error { color: #b00020; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -79,6 +80,9 @@ const page = `<!doctype html>
     <input id="q" name="q" type="text" value="{{ .Query }}" placeholder="type your query">
     <button type="submit">Search via proxy</button>
   </form>
+  {{ if .ErrorMessage }}
+  <p class="error">{{ .ErrorMessage }}</p>
+  {{ end }}
   {{ if .ShowResult }}
   <div class="card">
     <h2>Search Result (DuckDuckGo via proxy)</h2>
@@ -89,6 +93,42 @@ const page = `<!doctype html>
     <pre>{{ .ResultPreview }}</pre>
   </div>
   {{ end }}
+  <div class="card">
+    <h2>Random Chain (Website Tool)</h2>
+    <p>Generate a randomized hop chain directly from the web interface.</p>
+    <label for="hops">Hops (1-10)</label>
+    <input id="hops" type="number" min="1" max="10" value="3">
+    <button id="generateChain" type="button">Generate chain</button>
+    <pre id="chainOutput">Press "Generate chain" to load JSON from /api/random-chain.</pre>
+  </div>
+  <script>
+    (function () {
+      var button = document.getElementById('generateChain');
+      var hopsInput = document.getElementById('hops');
+      var output = document.getElementById('chainOutput');
+      if (!button || !hopsInput || !output) {
+        return;
+      }
+      button.addEventListener('click', function () {
+        var hops = hopsInput.value || '3';
+        fetch('/api/random-chain?hops=' + encodeURIComponent(hops))
+          .then(function (response) {
+            return response.text().then(function (body) {
+              return { ok: response.ok, body: body };
+            });
+          })
+          .then(function (result) {
+            output.textContent = result.body;
+            if (!result.ok) {
+              output.textContent = 'Request failed: ' + result.body;
+            }
+          })
+          .catch(function (error) {
+            output.textContent = 'Request failed: ' + error;
+          });
+      });
+    })();
+  </script>
 </body>
 </html>`
 
@@ -100,6 +140,7 @@ type pageData struct {
 	TargetURL     string
 	ChainJSON     string
 	ResultPreview string
+	ErrorMessage  string
 }
 
 func renderPage(w http.ResponseWriter, data pageData) error {
@@ -121,7 +162,10 @@ func (a *app) index(w http.ResponseWriter, r *http.Request) {
 func (a *app) search(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if query == "" {
-		http.Error(w, "missing query parameter q", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		if err := renderPage(w, pageData{ErrorMessage: "Please enter a search query."}); err != nil {
+			http.Error(w, "failed to render page", http.StatusInternalServerError)
+		}
 		return
 	}
 
